@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Investments Backup — Google Drive Picker</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:720px;margin:40px auto;padding:0 18px;line-height:1.55;color:#182433}label{display:block;margin-top:18px;font-weight:600}input{box-sizing:border-box;width:100%;padding:11px;border:1px solid #a8b4c0;border-radius:6px}button{margin-top:20px;padding:12px 18px;border:0;border-radius:6px;background:#155eef;color:white;font-weight:600}button:disabled{background:#9aa4b2}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f1f4f8;padding:12px;border-radius:6px}small{color:#526070}
+</style>
+</head>
+<body>
+<h1>Investments Backup — выбор папки</h1>
+<p>Эта страница предназначена только для однократного выбора существующей папки Google Drive. Она не загружает и не изменяет файлы.</p>
+<label for="client">Google OAuth Client ID</label><input id="client" autocomplete="off" placeholder="…apps.googleusercontent.com">
+<label for="key">Google Picker API key</label><input id="key" autocomplete="off" placeholder="AIza…">
+<label for="project">Google Cloud Project number</label><input id="project" inputmode="numeric" autocomplete="off" placeholder="Числовой Project number">
+<button id="launch" disabled>Загрузить библиотеки…</button>
+<p><small>Все введённые значения остаются в памяти этой вкладки. Страница не использует localStorage, cookies или стороннюю аналитику. API-ключ и OAuth Client ID не являются секретами, но их нельзя путать с Client Secret и refresh token.</small></p>
+<pre id="status">Ожидание загрузки Google API…</pre>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://apis.google.com/js/api.js" async defer></script>
+<script>
+'use strict';
+let pickerReady=false, tokenClient, accessToken='';
+const status=document.getElementById('status');
+const launch=document.getElementById('launch');
+function report(s){status.textContent=s}
+function waitForLibraries(){
+ if(window.google?.accounts?.oauth2 && window.gapi){
+  gapi.load('picker', {callback:()=>{pickerReady=true;launch.disabled=false;launch.textContent='Авторизоваться и выбрать папку';report('Готово. Введите три параметра и нажмите кнопку.')}});
+ }else setTimeout(waitForLibraries,200);
+}
+waitForLibraries();
+launch.addEventListener('click',()=>{
+ const client=document.getElementById('client').value.trim();
+ const key=document.getElementById('key').value.trim();
+ const project=document.getElementById('project').value.trim();
+ if(!pickerReady || !client.endsWith('.apps.googleusercontent.com') || !key || !/^\d+$/.test(project)){
+  report('Проверьте OAuth Client ID, API key и числовой Project number.');return;
+ }
+ launch.disabled=true;
+ tokenClient=google.accounts.oauth2.initTokenClient({
+  client_id:client,
+  scope:'https://www.googleapis.com/auth/drive.file',
+  callback:(response)=>{
+   if(response.error || !response.access_token){report('Ошибка авторизации: '+(response.error||'нет access token'));launch.disabled=false;return}
+   accessToken=response.access_token;
+   const view=new google.picker.DocsView(google.picker.ViewId.FOLDERS)
+      .setIncludeFolders(true).setSelectFolderEnabled(true).setMimeTypes('application/vnd.google-apps.folder');
+   const picker=new google.picker.PickerBuilder()
+      .addView(view).setOAuthToken(accessToken).setDeveloperKey(key).setAppId(project)
+      .setOrigin(window.location.origin)
+      .setCallback(data=>{
+       if(data.action===google.picker.Action.PICKED){
+        const doc=data.docs?.[0];
+        report('Папка выбрана.\nID: '+(doc?.id||'не получен')+'\nНазвание: '+(doc?.name||'не получено')+'\nДоступ к вложенным файлам и запись ещё не проверены.');
+       }else if(data.action===google.picker.Action.CANCEL){report('Выбор отменён.');}
+       launch.disabled=false;
+      }).build();
+   picker.setVisible(true);
+  },
+  error_callback:()=>{report('Окно Google OAuth не открылось или было закрыто.');launch.disabled=false;}
+ });
+ tokenClient.requestAccessToken({prompt:'consent'});
+});
+</script>
+</body>
+</html>
