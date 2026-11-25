@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Investments Backup — групповой выбор</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:720px;margin:24px auto;padding:0 16px;line-height:1.5;color:#172333}label{display:block;margin-top:16px;font-weight:600}input,select{box-sizing:border-box;width:100%;padding:10px;border:1px solid #a8b4c0;border-radius:6px;font:inherit}button{margin:18px 0 6px;padding:12px 18px;border:0;border-radius:6px;background:#155eef;color:white;font-weight:600}button:disabled{background:#8995a3}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f1f4f8;padding:12px;border-radius:6px}small{color:#526070}
+</style>
+</head><body>
+<h1>Групповая авторизация Google Drive</h1>
+<p>Выберите только заранее согласованные папки или файлы резервной копии. Страница не копирует, не удаляет и не изменяет файлы. Выбор предоставляет приложению доступ к выбранным объектам. Выбор папки не авторизует её содержимое автоматически.</p>
+<label for="client">OAuth Client ID</label><input id="client" autocomplete="off" spellcheck="false" placeholder="…apps.googleusercontent.com">
+<label for="key">Picker API key</label><input id="key" type="password" autocomplete="off" spellcheck="false">
+<label for="project">Project number</label><input id="project" inputmode="numeric" autocomplete="off" placeholder="Число">
+<label for="kind">Режим выбора</label><select id="kind"><option value="folders">Папки</option><option value="files">Файлы</option></select>
+<label for="parent">ID начальной папки (необязательно)</label><input id="parent" autocomplete="off" spellcheck="false">
+<p><small>Начальная папка помогает ориентироваться, но не ограничивает предоставляемые разрешения. Не выбирайте личные файлы вне резервной копии. Не вводите Client Secret, refresh token или authorization code.</small></p>
+<button id="launch" disabled>Загрузка Google Picker…</button>
+<pre id="status" role="status" aria-live="polite">Ожидание библиотек Google…</pre>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://apis.google.com/js/api.js" async defer></script>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+const launch=$('launch'), status=$('status');
+const report=s=>{status.textContent=s};
+let ready=false, attempts=0;
+function init(){
+ if(window.google?.accounts?.oauth2&&window.gapi){
+  gapi.load('picker',{callback:()=>{ready=true;launch.disabled=false;launch.textContent='Авторизоваться и выбрать';report('Введите параметры нового проекта.')}});
+ }else if(++attempts<100){setTimeout(init,200)}
+ else report('Google API не загрузились. Обновите страницу.');
+}
+init();
+launch.addEventListener('click',()=>{
+ const client=$('client').value.trim(),key=$('key').value.trim(),project=$('project').value.trim(),parent=$('parent').value.trim(),folders=$('kind').value==='folders';
+ if(!ready||!/^\d+-[a-zA-Z0-9_-]+\.apps\.googleusercontent\.com$/.test(client)||!/^\d+$/.test(project)||!client.startsWith(project+'-')||!key||(parent&&!/^[a-zA-Z0-9_-]+$/.test(parent))){report('Проверьте параметры одного Google Cloud проекта.');return}
+ launch.disabled=true;
+ const fail=()=>{report('Авторизация или Picker не завершены. Проверьте конфигурацию.');launch.disabled=false};
+ try{
+  const tc=google.accounts.oauth2.initTokenClient({
+   client_id:client,scope:'https://www.googleapis.com/auth/drive.file',include_granted_scopes:false,
+   callback:response=>{
+    if(response.error||!response.access_token){fail();return}
+    try{
+     const view=new google.picker.DocsView(folders?google.picker.ViewId.FOLDERS:google.picker.ViewId.DOCS).setIncludeFolders(true).setSelectFolderEnabled(folders).setMode(google.picker.DocsViewMode.LIST);
+     if(folders)view.setMimeTypes('application/vnd.google-apps.folder');
+     if(parent)view.setParent(parent);
+     const picker=new google.picker.PickerBuilder().addView(view).enableFeature(google.picker.Feature.MULTISELECT_ENABLED).setOAuthToken(response.access_token).setDeveloperKey(key).setAppId(project).setOrigin(location.origin).setCallback(data=>{
+      if(data.action===google.picker.Action.PICKED){
+       const docs=Array.isArray(data.docs)?data.docs:[];
+       report('Выбрано объектов: '+docs.length+'\n'+docs.map(d=>String(d.name||'Без названия')+' — '+String(d.id||'ID отсутствует')).join('\n')+'\n\nСерверная проверка авторизации и принадлежности объектов ещё необходима.');
+       launch.disabled=false;
+      }else if(data.action===google.picker.Action.CANCEL){report('Выбор отменён.');launch.disabled=false;}
+     }).build();
+     picker.setVisible(true);
+    }catch(_){fail()}
+   },error_callback:fail
+  });
+  tc.requestAccessToken({prompt:'select_account'});
+ }catch(_){fail()}
+});
+</script>
+</body></html>
